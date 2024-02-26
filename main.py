@@ -62,6 +62,17 @@ client.execute(query)
 print("Materialized view user_activity_sessions created successfully.")
 print("Tables and view created successfully!")
 
+query = """
+ALTER TABLE IF EXISTS myClickHouse.advertising_costs
+ADD COLUMN IF NOT EXISTS version UInt32 DEFAULT 1;
+"""
+client.execute(query)
+
+query = """
+ALTER TABLE IF EXISTS myClickHouse.user_activity
+ADD COLUMN IF NOT EXISTS version UInt32 DEFAULT 1;
+"""
+client.execute(query)
 
 directory_path = "data/"
 batch_files = [os.path.join(directory_path, file) for file in os.listdir(directory_path) if file.endswith(".csv")]
@@ -74,8 +85,12 @@ for batch_file in batch_files:
             date, app_id, platform, source, views, cost = row
             
             query = f"""
-            INSERT INTO myClickHouse.advertising_costs (date, app_id, platform, source, views, cost)
-            VALUES ('{date}', '{app_id}', '{platform}', '{source}', {views}, {cost});
+            INSERT INTO myClickHouse.advertising_costs (date, app_id, platform, source, views, cost, version)
+            VALUES ('{date}', '{app_id}', '{platform}', '{source}', {views}, {cost}, 1);
+            ON DUPLICATE KEY UPDATE
+                views = views + VALUES(views),
+                cost = VALUES(cost),
+                version = version + 1;
             """
             
             client.execute(query)
@@ -91,8 +106,12 @@ with open(csv_file_path, 'r') as f:
         user_id, event_timestamp, event_type = line.strip().split(',')
         
         insert_data_query = f"""
-        INSERT INTO myClickHouse.user_activity (user_id, event_timestamp, event_type)
-        VALUES ('{user_id}', '{event_timestamp}', '{event_type}');
+        INSERT INTO myClickHouse.user_activity (user_id, event_timestamp, event_type, version)
+        VALUES ('{user_id}', '{event_timestamp}', '{event_type}', 1);
+        ON DUPLICATE KEY UPDATE
+            event_timestamp = GREATEST(event_timestamp, VALUES(event_timestamp)),
+            event_type = VALUES(event_type),
+            version = version + 1;
         """
     
         client.execute(insert_data_query)
